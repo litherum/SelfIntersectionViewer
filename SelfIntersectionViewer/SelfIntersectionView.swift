@@ -20,8 +20,7 @@ class SelfIntersectionView : NSView {
     let pointRadius = CGFloat(10)
     var lminsaved: (CGFloat, CGFloat, CGFloat)
     var lmaxsaved: (CGFloat, CGFloat, CGFloat)
-    var minTsaved: CGFloat?
-    var maxTsaved: CGFloat?
+    var clippedBezier: (CGPoint, CGPoint, CGPoint, CGPoint)
 
     enum ParticularPoint {
         case Point0
@@ -44,9 +43,14 @@ class SelfIntersectionView : NSView {
         q3 = CGPointMake(400, 200)
         lminsaved = (0, 0, 0)
         lmaxsaved = (0, 0, 0)
+        clippedBezier = (CGPointZero, CGPointZero, CGPointZero, CGPointZero)
         super.init(coder: coder)
         updateIntersectionPoint()
-        clipping(p0, p1: p1, p2: p2, p3: p3, q0: q0, q1: q1, q2: q2, q3: q3)
+        if let clipped = clipping(p0: p0, p1: p1, p2: p2, p3: p3, q0: q0, q1: q1, q2: q2, q3: q3) {
+            clippedBezier = clipped
+        } else {
+            clippedBezier = (NSZeroPoint, NSZeroPoint, NSZeroPoint, NSZeroPoint)
+        }
     }
 
     func drawControlPoint(point: CGPoint) {
@@ -95,13 +99,11 @@ class SelfIntersectionView : NSView {
         drawLine(lminsaved)
         drawLine(lmaxsaved)
 
-        NSColor.cyanColor().set()
-        if let t = minTsaved {
-            drawControlPoint(interpolatePoint(t, point0: p0, point1: p1, point2: p2, point3: p3))
-        }
-        if let t = maxTsaved {
-            drawControlPoint(interpolatePoint(t, point0: p0, point1: p1, point2: p2, point3: p3))
-        }
+        NSColor.purpleColor().set()
+        path = NSBezierPath()
+        path.moveToPoint(clippedBezier.0)
+        path.curveToPoint(clippedBezier.3, controlPoint1: clippedBezier.1, controlPoint2: clippedBezier.2)
+        path.stroke()
     }
 
     func mouseIsOver(mouseLocation: NSPoint, point: NSPoint) -> Bool {
@@ -141,7 +143,11 @@ class SelfIntersectionView : NSView {
                 p3 = NSMakePoint(p3.x + mouseDelta.width, p3.y - mouseDelta.height)
             }
             updateIntersectionPoint()
-            clipping(p0, p1: p1, p2: p2, p3: p3, q0: q0, q1: q1, q2: q2, q3: q3)
+            if let clipped = clipping(p0: p0, p1: p1, p2: p2, p3: p3, q0: q0, q1: q1, q2: q2, q3: q3) {
+                clippedBezier = clipped
+            } else {
+                clippedBezier = (NSZeroPoint, NSZeroPoint, NSZeroPoint, NSZeroPoint)
+            }
             setNeedsDisplayInRect(self.bounds)
         }
     }
@@ -190,6 +196,10 @@ class SelfIntersectionView : NSView {
         return u1 * v1 + u2 * v2 + u3 * v3
     }
 
+    func lerp(point0: CGPoint, point1: CGPoint, t: CGFloat) -> CGPoint {
+        return CGPointMake(point1.x * t + point0.x * (1 - t), point1.y * t + point0.y * (1 - t))
+    }
+
     func clipOnce(e0: CGFloat, e1: CGFloat, e2: CGFloat, e3: CGFloat) -> CGFloat? {
         if e0 > 0 || e3 < 0 {
             return nil
@@ -216,7 +226,7 @@ class SelfIntersectionView : NSView {
         return result
     }
 
-    func clipping(p0: CGPoint, p1: CGPoint, p2: CGPoint, p3: CGPoint, q0: CGPoint, q1: CGPoint, q2: CGPoint, q3: CGPoint) -> (CGPoint, CGPoint, CGPoint, CGPoint) {
+    func clipping(p0 p0in: CGPoint, p1 p1in: CGPoint, p2 p2in: CGPoint, p3 p3in: CGPoint, q0: CGPoint, q1: CGPoint, q2: CGPoint, q3: CGPoint) -> (CGPoint, CGPoint, CGPoint, CGPoint)? {
         // Bezier Clipping. http://cagd.cs.byu.edu/~557/text/ch7.pdf
         let (l0, l1, l2) = cross(q0.x, u2: q0.y, u3: 1, v1: q3.x, v2: q3.y, v3: 1)
         let c1 = -l0 * q1.x - l1 * q1.y
@@ -226,36 +236,28 @@ class SelfIntersectionView : NSView {
         lminsaved = lmin
         lmaxsaved = lmax
         
+        var point0 = p0in
+        var point1 = p1in
+        var point2 = p2in
+        var point3 = p3in
+
+        var e0min = dot(lmin.0, u2: lmin.1, u3: lmin.2, v1: point0.x, v2: point0.y, v3: 1)
+        var e1min = dot(lmin.0, u2: lmin.1, u3: lmin.2, v1: point1.x, v2: point1.y, v3: 1)
+        var e2min = dot(lmin.0, u2: lmin.1, u3: lmin.2, v1: point2.x, v2: point2.y, v3: 1)
+        var e3min = dot(lmin.0, u2: lmin.1, u3: lmin.2, v1: point3.x, v2: point3.y, v3: 1)
+        var e0max = dot(lmax.0, u2: lmax.1, u3: lmax.2, v1: point0.x, v2: point0.y, v3: 1)
+        var e1max = dot(lmax.0, u2: lmax.1, u3: lmax.2, v1: point1.x, v2: point1.y, v3: 1)
+        var e2max = dot(lmax.0, u2: lmax.1, u3: lmax.2, v1: point2.x, v2: point2.y, v3: 1)
+        var e3max = dot(lmax.0, u2: lmax.1, u3: lmax.2, v1: point3.x, v2: point3.y, v3: 1)
+
+        if ((e0min < 0 && e1min < 0 && e2min < 0 && e3min < 0) || (e0max < 1 && e1max < 1 && e2max < 1 && e3max < 1)) {
+            return nil
+        }
+
         var minT: CGFloat? = nil
-        var maxT: CGFloat? = nil
-        
-        let e0min = dot(lmin.0, u2: lmin.1, u3: lmin.2, v1: p0.x, v2: p0.y, v3: 1)
-        let e1min = dot(lmin.0, u2: lmin.1, u3: lmin.2, v1: p1.x, v2: p1.y, v3: 1)
-        let e2min = dot(lmin.0, u2: lmin.1, u3: lmin.2, v1: p2.x, v2: p2.y, v3: 1)
-        let e3min = dot(lmin.0, u2: lmin.1, u3: lmin.2, v1: p3.x, v2: p3.y, v3: 1)
-        
         if let clipped = clipOnce(e0min, e1: e1min, e2: e2min, e3: e3min) {
-            if let t = minT {
-                minT = min(t, clipped)
-            } else {
-                minT = clipped
-            }
+            minT = clipped
         }
-        
-        if let initialClipped = clipOnce(e3min, e1: e2min, e2: e1min, e3: e0min) {
-            let clipped = 1 - initialClipped
-            if let t = maxT {
-                maxT = max(t, clipped)
-            } else {
-                maxT = clipped
-            }
-        }
-        
-        let e0max = lmax.0 * p0.x + lmax.1 * p0.y + lmax.2
-        let e1max = lmax.0 * p1.x + lmax.1 * p1.y + lmax.2
-        let e2max = lmax.0 * p2.x + lmax.1 * p2.y + lmax.2
-        let e3max = lmax.0 * p3.x + lmax.1 * p3.y + lmax.2
-        
         if let clipped = clipOnce(e0max, e1: e1max, e2: e2max, e3: e3max) {
             if let t = minT {
                 minT = min(t, clipped)
@@ -264,6 +266,37 @@ class SelfIntersectionView : NSView {
             }
         }
         
+        var clipMinT: CGFloat
+        if let minT = minT {
+            clipMinT = minT
+        } else {
+            clipMinT = 0
+        }
+
+        var p01 = lerp(point0, point1: point1, t: clipMinT)
+        var p12 = lerp(point1, point1: point2, t: clipMinT)
+        var p23 = lerp(point2, point1: point3, t: clipMinT)
+        var p012 = lerp(p01, point1: p12, t: clipMinT)
+        var p123 = lerp(p12, point1: p23, t: clipMinT)
+        var p0123 = lerp(p012, point1: p123, t: clipMinT)
+        (point0, point1, point2, point3) = (p0123, p123, p23, point3)
+
+
+
+
+        e0min = dot(lmin.0, u2: lmin.1, u3: lmin.2, v1: point0.x, v2: point0.y, v3: 1)
+        e1min = dot(lmin.0, u2: lmin.1, u3: lmin.2, v1: point1.x, v2: point1.y, v3: 1)
+        e2min = dot(lmin.0, u2: lmin.1, u3: lmin.2, v1: point2.x, v2: point2.y, v3: 1)
+        e3min = dot(lmin.0, u2: lmin.1, u3: lmin.2, v1: point3.x, v2: point3.y, v3: 1)
+        e0max = dot(lmax.0, u2: lmax.1, u3: lmax.2, v1: point0.x, v2: point0.y, v3: 1)
+        e1max = dot(lmax.0, u2: lmax.1, u3: lmax.2, v1: point1.x, v2: point1.y, v3: 1)
+        e2max = dot(lmax.0, u2: lmax.1, u3: lmax.2, v1: point2.x, v2: point2.y, v3: 1)
+        e3max = dot(lmax.0, u2: lmax.1, u3: lmax.2, v1: point3.x, v2: point3.y, v3: 1)
+
+        var maxT: CGFloat? = nil
+        if let initialClipped = clipOnce(e3min, e1: e2min, e2: e1min, e3: e0min) {
+            maxT = 1 - initialClipped
+        }
         if let initialClipped = clipOnce(e3max, e1: e2max, e2: e1max, e3: e0max) {
             let clipped = 1 - initialClipped
             if let t = maxT {
@@ -272,10 +305,22 @@ class SelfIntersectionView : NSView {
                 maxT = clipped
             }
         }
+        
+        var clipMaxT: CGFloat
+        if let maxT = maxT {
+            clipMaxT = maxT
+        } else {
+            clipMaxT = 1
+        }
 
-        minTsaved = minT
-        maxTsaved = maxT
+        p01 = lerp(point0, point1: point1, t: clipMaxT)
+        p12 = lerp(point1, point1: point2, t: clipMaxT)
+        p23 = lerp(point2, point1: point3, t: clipMaxT)
+        p012 = lerp(p01, point1: p12, t: clipMaxT)
+        p123 = lerp(p12, point1: p23, t: clipMaxT)
+        p0123 = lerp(p012, point1: p123, t: clipMaxT)
+        (point0, point1, point2, point3) = (point0, p01, p012, p0123)
 
-        return (p0, p1, p2, p3)
+        return (point0, point1, point2, point3)
     }
 }
